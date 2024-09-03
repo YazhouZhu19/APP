@@ -121,6 +121,8 @@ class FewShotSeg(nn.Module):
         outputs_qry = []
         loss_wt_spt_1 = torch.zeros(1).to(self.device)
         loss_wt_qry_1 = torch.zeros(1).to(self.device)
+        loss_wt_spt_2 = torch.zeros(1).to(self.device)
+        loss_wt_qry_2 = torch.zeros(1).to(self.device)
         for epi in range(supp_bs):
 
             if supp_mask[[0], 0, 0].max() > 0.:
