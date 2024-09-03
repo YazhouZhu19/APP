@@ -171,8 +171,6 @@ class FewShotSeg(nn.Module):
                     # ******************************************************************* #
 
                     # ************************ Two-stage Attack ************************* #
-                    # index = torch.randint(0, len(self.epsilon_list), (1,))[0]
-                    # epsilon = self.epsilon_list[index]
                     selected_values = random.choices(self.epsilon_list, k=512)
                     epsilon = torch.tensor(selected_values, dtype=torch.float32).unsqueeze(0).to(self.device)
 
