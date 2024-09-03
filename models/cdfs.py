@@ -1,5 +1,5 @@
 """
-encoder resnet50, GNN geometrical feature extractor, feature transform operation
+The first version
 """
 import random
 
