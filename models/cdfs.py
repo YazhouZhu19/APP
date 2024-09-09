@@ -32,9 +32,6 @@ class ChannelAttention(nn.Module):
         return x * y
 
 
-
-
-
 class FewShotSeg(nn.Module):
 
     def __init__(self, args):
