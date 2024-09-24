@@ -1,5 +1,5 @@
 """
-The first version
+encoder resnet50, GNN geometrical feature extractor, feature transform operation
 """
 import random
 
@@ -10,6 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from .encoder_1 import Res50Encoder
+from .detection_head import *
 
 
 
@@ -30,6 +31,7 @@ class ChannelAttention(nn.Module):
         y = self.avg_pool(x.unsqueeze(-1)).view(b, c)
         y = self.fc(y).view(b, c)
         return x * y
+
 
 
 class FewShotSeg(nn.Module):
@@ -168,6 +170,8 @@ class FewShotSeg(nn.Module):
                     # ******************************************************************* #
 
                     # ************************ Two-stage Attack ************************* #
+                    # index = torch.randint(0, len(self.epsilon_list), (1,))[0]
+                    # epsilon = self.epsilon_list[index]
                     selected_values = random.choices(self.epsilon_list, k=512)
                     epsilon = torch.tensor(selected_values, dtype=torch.float32).unsqueeze(0).to(self.device)
 
@@ -181,9 +185,8 @@ class FewShotSeg(nn.Module):
                                                          grad_spt_fg_proto_learnable_b[way])
                                         for way in range(self.n_ways)]
                     # the first stage whitening
-                    if train:
-                        loss_wt_spt_1 = self.Whitening(adv_spt_fg_proto[0], spt_fg_proto[0])
-                        loss_wt_qry_1 = self.Whitening(adv_qry_fg_proto[0], qry_fg_proto[0])
+                    loss_wt_spt_1 = self.Whitening(adv_spt_fg_proto[0], spt_fg_proto[0])
+                    loss_wt_qry_1 = self.Whitening(adv_qry_fg_proto[0], qry_fg_proto[0])
             
                     fg_proto_inter = [torch.cat([adv_spt_fg_proto[way], adv_qry_fg_proto[way]], dim=1)
                                       for way in range(self.n_ways)]
@@ -235,9 +238,8 @@ class FewShotSeg(nn.Module):
                     adv_qry_proto_second = [self.att(proto_qry_inter_second[way]) for way in range(self.n_ways)]
 
                     # the second stage whitening
-                    if train:
-                        loss_wt_spt_2 = self.Whitening(adv_spt_proto_second[0], spt_fg_proto[0])
-                        loss_wt_qry_2 = self.Whitening(adv_qry_proto_second[0], qry_fg_proto[0])
+                    loss_wt_spt_2 = self.Whitening(adv_spt_proto_second[0], spt_fg_proto[0])
+                    loss_wt_qry_2 = self.Whitening(adv_qry_proto_second[0], qry_fg_proto[0])
                     
                     proto_second_ = [torch.cat((adv_spt_proto_second[way], adv_qry_proto_second[way]), dim=1) for way in range(self.n_ways)]
                     proto_second = [self.att(self.function_layer(proto_second_[way])) for way in range(self.n_ways)] 
@@ -246,11 +248,52 @@ class FewShotSeg(nn.Module):
                     qry_pred_up = F.interpolate(qry_pred, size=img_size, mode='bilinear', align_corners=True)
                     preds = torch.cat((1.0 - qry_pred_up, qry_pred_up), dim=1)
                     outputs_qry.append(preds)
+
+                else:
+                    fg_proto_inter = [torch.cat([spt_fg_proto[way], qry_fg_proto[way]], dim=1)
+                                      for way in range(self.n_ways)]
+                    fg_proto_inter = [self.function_layer(fg_proto_inter[way]) for way in range(self.n_ways)]
+                    proto_first = [self.att(fg_proto_inter[way]) for way in range(self.n_ways)]
+
+                    proto_sampling_1 = [proto_first[way][:, torch.randperm(512)[:256]] for way in range(self.n_ways)]
+                    proto_sampling_1 = [self.sampling_reshape_1(proto_sampling_1[way]) for way in range(self.n_ways)]
+                    proto_sampling_2 = [proto_first[way][:, torch.randperm(512)[:128]] for way in range(self.n_ways)]
+                    proto_sampling_2 = [self.sampling_reshape_2(proto_sampling_2[way]) for way in range(self.n_ways)]
+                    proto_sampling_3 = [proto_first[way][:, torch.randperm(512)[:64]] for way in range(self.n_ways)]
+                    proto_sampling_3 = [self.sampling_reshape_3(proto_sampling_3[way]) for way in range(self.n_ways)]
+
+                    spt_fg_proto_two_1 = [torch.cat((spt_fg_proto[way], proto_sampling_1[way]), dim=1) for way in range(self.n_ways)] 
+                    spt_fg_proto_two_1 = [self.function_layer(spt_fg_proto_two_1[way]) for way in range(self.n_ways)]
+                    spt_fg_proto_two_2 = [torch.cat((spt_fg_proto[way], proto_sampling_2[way]), dim=1) for way in range(self.n_ways)] 
+                    spt_fg_proto_two_2 = [self.function_layer(spt_fg_proto_two_2[way]) for way in range(self.n_ways)]
+                    spt_fg_proto_two_3 = [torch.cat((spt_fg_proto[way], proto_sampling_3[way]), dim=1) for way in range(self.n_ways)]
+                    spt_fg_proto_two_3 = [self.function_layer(spt_fg_proto_two_3[way]) for way in range(self.n_ways)]
+
+                    proto_spt_inter = [(spt_fg_proto_two_1[way] + spt_fg_proto_two_2[way] + spt_fg_proto_two_3[way]) for way in range(self.n_ways)] 
+                    proto_spt = [self.att(proto_spt_inter[way]) for way in range(self.n_ways)]
+
+                    qry_fg_proto_two_1 = [torch.cat((qry_fg_proto[way], proto_sampling_1[way]), dim=1) for way in range(self.n_ways)]
+                    qry_fg_proto_two_1 = [self.function_layer(qry_fg_proto_two_1[way]) for way in range(self.n_ways)]
+                    qry_fg_proto_two_2 = [torch.cat((qry_fg_proto[way], proto_sampling_2[way]), dim=1) for way in range(self.n_ways)]
+                    qry_fg_proto_two_2 = [self.function_layer(qry_fg_proto_two_2[way]) for way in range(self.n_ways)]
+                    qry_fg_proto_two_3 = [torch.cat((qry_fg_proto[way], proto_sampling_3[way]), dim=1) for way in range(self.n_ways)]
+                    qry_fg_proto_two_3 = [self.function_layer(qry_fg_proto_two_3[way]) for way in range(self.n_ways)]
+
+                    proto_qry_inter = [(qry_fg_proto_two_1[way] + qry_fg_proto_two_2[way] + qry_fg_proto_two_3[way]) for way in range(self.n_ways)] 
+                    proto_qry = [self.att(proto_qry_inter[way]) for way in range(self.n_ways)]
+
+                    proto = [torch.cat((proto_spt[way], proto_qry[way]), dim=1) for way in range(self.n_ways)]
+                    proto = [self.att(self.function_layer(proto[way])) for way in range(self.n_ways)] 
+
+                    qry_pred = torch.stack([self.getPred(qry_fts[epi], proto[way], self.thresh_pred[way]) for way in range(self.n_ways)], dim=1)
+                    qry_pred_up = F.interpolate(qry_pred, size=img_size, mode='bilinear', align_corners=True)
+                    preds = torch.cat((1.0 - qry_pred_up, qry_pred_up), dim=1)
+                    outputs_qry.append(preds)  
                     
                 ########################################################################
 
             else:
-                ########################acquiesce prototypical network ################
+                ########################acquiesce prototypical network#################
                 supp_fts_ = [[self.getFeatures(supp_fts[[epi], way, shot], supp_mask[[epi], way, shot])
                               for shot in range(self.n_shots)] for way in range(self.n_ways)]
                 fg_prototypes = self.getPrototype(supp_fts_)  # the coarse foreground
