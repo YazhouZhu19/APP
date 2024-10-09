@@ -6,7 +6,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .encoder_1 import Res50Encoder
+from .encoder import Res50Encoder
 from .detection_head import *
 
 
