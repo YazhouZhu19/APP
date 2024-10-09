@@ -1,7 +1,4 @@
-"""
-Dataset for Training and Test
-Extended from ADNet code by Hansen et al.
-"""
+
 import torch
 import cv2
 from torch.utils.data import Dataset
