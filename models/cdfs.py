@@ -1,6 +1,3 @@
-"""
-encoder resnet50, GNN geometrical feature extractor, feature transform operation
-"""
 import random
 
 import numpy as np
