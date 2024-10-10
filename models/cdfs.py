@@ -1,3 +1,6 @@
+"""
+encoder resnet50, GNN geometrical feature extractor, feature transform operation
+"""
 import random
 
 import numpy as np
@@ -6,9 +9,8 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .encoder import Res50Encoder
+from .encoder_1 import Res50Encoder
 from .detection_head import *
-
 
 
 class ChannelAttention(nn.Module):
@@ -28,7 +30,6 @@ class ChannelAttention(nn.Module):
         y = self.avg_pool(x.unsqueeze(-1)).view(b, c)
         y = self.fc(y).view(b, c)
         return x * y
-
 
 
 class FewShotSeg(nn.Module):
@@ -119,6 +120,10 @@ class FewShotSeg(nn.Module):
         loss_wt_qry_1 = torch.zeros(1).to(self.device)
         loss_wt_spt_2 = torch.zeros(1).to(self.device)
         loss_wt_qry_2 = torch.zeros(1).to(self.device)
+
+        align_loss = torch.zeros(1).to(self.device)
+        mse_loss = torch.zeros(1).to(self.device)
+
         for epi in range(supp_bs):
 
             if supp_mask[[0], 0, 0].max() > 0.:
@@ -286,7 +291,14 @@ class FewShotSeg(nn.Module):
                     qry_pred_up = F.interpolate(qry_pred, size=img_size, mode='bilinear', align_corners=True)
                     preds = torch.cat((1.0 - qry_pred_up, qry_pred_up), dim=1)
                     outputs_qry.append(preds)  
-                    
+                
+                if train: 
+                    align_loss_epi = self.alignLoss(supp_fts[epi], qry_fts[epi], preds, supp_mask[epi])
+                    align_loss += align_loss_epi
+                if train: 
+                    proto_mse_loss_epi = self.proto_mse(qry_fts[epi], preds, supp_mask[epi], proto_second)
+                    mse_loss += proto_mse_loss_epi
+
                 ########################################################################
 
             else:
@@ -309,7 +321,7 @@ class FewShotSeg(nn.Module):
         output_qry = torch.stack(outputs_qry, dim=1)
         output_qry = output_qry.view(-1, *output_qry.shape[2:])
 
-        return output_qry, loss_wt_spt_1 / supp_bs, loss_wt_qry_1 / supp_bs, loss_wt_spt_2 / supp_bs, loss_wt_qry_2 / supp_bs
+        return output_qry, loss_wt_spt_1 / supp_bs, loss_wt_qry_1 / supp_bs, loss_wt_spt_2 / supp_bs, loss_wt_qry_2 / supp_bs, align_loss / supp_bs, mse_loss / supp_bs
 
     def getPred(self, fts, prototype, thresh):
         """
@@ -581,8 +593,84 @@ class FewShotSeg(nn.Module):
             centroids = torch.stack(new_centroids)
 
         return labels, centroids
-
     
+    def alignLoss(self, supp_fts, qry_fts, pred, fore_mask):
+        n_ways, n_shots = len(fore_mask), len(fore_mask[0])
+
+        # Get query mask
+        pred_mask = pred.argmax(dim=1, keepdim=True).squeeze(1)  # N x H' x W'
+        binary_masks = [pred_mask == i for i in range(1 + n_ways)]
+        skip_ways = [i for i in range(n_ways) if binary_masks[i + 1].sum() == 0]
+        pred_mask = torch.stack(binary_masks, dim=0).float()  # (1 + Wa) x N x H' x W'
+
+        # Compute the support loss
+        loss = torch.zeros(1).to(self.device)
+        for way in range(n_ways):
+            if way in skip_ways:
+                continue
+            # Get the query prototypes
+            for shot in range(n_shots):
+                # Get prototypes
+                qry_fts_ = [self.getFeatures(qry_fts, pred_mask[way + 1])]
+                fg_prototypes = self.getPrototype([qry_fts_])
+
+                # Get predictions
+                supp_pred = self.getPred(supp_fts[way, [shot]], fg_prototypes[way], self.thresh_pred[way])  # N x Wa x H' x W'
+                supp_pred = F.interpolate(supp_pred[None, ...], size=fore_mask.shape[-2:], mode='bilinear',
+                                           align_corners=True)
+
+
+                # Combine predictions of different feature maps
+                preds = supp_pred
+                pred_ups = torch.cat((1.0 - preds, preds), dim=1)
+
+                # Construct the support Ground-Truth segmentation
+                supp_label = torch.full_like(fore_mask[way, shot], 255, device=fore_mask.device)
+                supp_label[fore_mask[way, shot] == 1] = 1
+                supp_label[fore_mask[way, shot] == 0] = 0
+
+                # Compute Loss
+                eps = torch.finfo(torch.float32).eps
+                log_prob = torch.log(torch.clamp(pred_ups, eps, 1 - eps))
+                loss += self.criterion(log_prob, supp_label[None, ...].long()) / n_shots / n_ways
+
+        return loss
+
+    def proto_mse(self, qry_fts, pred, fore_mask, supp_prototypes):
+        n_ways, n_shots = len(fore_mask), len(fore_mask[0])
+
+        pred_mask = pred.argmax(dim=1, keepdim=True).squeeze(1)
+        binary_masks = [pred_mask == i for i in range(1 + n_ways)]
+        skip_ways = [i for i in range(n_ways) if binary_masks[i + 1].sum() == 0]
+        pred_mask = torch.stack(binary_masks, dim=0).float()  # (1 + Wa) x N x H' x W'
+
+        # Compute the support loss
+        loss_sim = torch.zeros(1).to(self.device)
+        for way in range(n_ways):
+            if way in skip_ways:
+                continue
+            # Get the query prototypes
+            for shot in range(n_shots):
+                # Get prototypes
+                qry_fts_ = [[self.getFeatures(qry_fts, pred_mask[way + 1])]]
+
+                fg_prototypes = self.getPrototype(qry_fts_)
+
+                fg_prototypes_ = torch.sum(torch.stack(fg_prototypes, dim=0), dim=0)
+                supp_prototypes_ = torch.sum(torch.stack(supp_prototypes, dim=0), dim=0)
+
+                # Combine prototypes from different scales
+                # fg_prototypes = self.alpha * fg_prototypes[way]
+                # fg_prototypes = torch.sum(torch.stack(fg_prototypes, dim=0), dim=0) / torch.sum(self.alpha)
+                # supp_prototypes_ = [self.alpha[n] * supp_prototypes[n][way] for n in range(len(supp_fts))]
+                # supp_prototypes_ = torch.sum(torch.stack(supp_prototypes_, dim=0), dim=0) / torch.sum(self.alpha)
+
+                # Compute the MSE loss
+
+                loss_sim += self.mse_loss(fg_prototypes_, supp_prototypes_)
+
+        return loss_sim
+
 
 
 
