@@ -1,6 +1,6 @@
 # APP: Adversarial Prototypical Perturbation for Cross-domain Few-shot Medical Image Segmentation 👻
 
-![](./app.PNG)
+<p align="center"><img width="80%" src="./app.PNG" />
 
 
 #### Abstract
