@@ -21,7 +21,7 @@ Few-shot Medical Image Segmentation (FSMIS) has become one of the potential solu
 #### Performance 🔥 
 
 <p align="center">
-    <img src="performance.png" width="50%"> <br>
+    <img src="performance.png" width="25%"> <br>
 </p>
 
 
