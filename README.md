@@ -5,7 +5,7 @@
 </div>
 
 
-<p align="center"><img width="95%" src="./app.PNG" />
+<p align="center"><img width="95%" src="./APP.PNG" />
 
 
 ## Abstract
