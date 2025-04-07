@@ -1,6 +1,6 @@
 <div align="center">
 
-<h1>APP: Adversarial Prototypical Perturbation for Cross-domain Few-shot Medical Image Segmentation</h1>
+<h1>Adversarial Prototypical Perturbation for Cross-domain Few-shot Medical Image Segmentation</h1>
 
 </div>
 
